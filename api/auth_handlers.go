@@ -18,16 +18,16 @@ type Server struct {
 	jwtSecret string
 }
 
-func (s *Server) RegisterUser(ctx *gin.Context) {
+func (s *Server) RegisterUser(c *gin.Context) {
 	var payload models.RegisterPayload
-	if err := ctx.ShouldBindJSON(&payload); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
 		return
 	}
 
 	hashedPassword, err := auth.HashPassword(payload.Password)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
 		return
 	}
 
@@ -41,43 +41,56 @@ func (s *Server) RegisterUser(ctx *gin.Context) {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
 			if pgErr.Code == "23505" {
-				ctx.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
+				c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
 				return
 			}
 		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 	}
 
-	ctx.JSON(http.StatusCreated, gin.H{"message": "User created successfully", "user": user})
+	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully", "user": user})
 }
 
-func (s *Server) LoginUser(ctx *gin.Context) {
+func (s *Server) LoginUser(c *gin.Context) {
 	var payload models.LoginPayload
-	if err := ctx.ShouldBindJSON(&payload); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
 		return
 	}
 
 	user, err := s.store.GetUserByUsername(context.Background(), payload.Username)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 			return
 		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
 	}
 
 	if !auth.CheckPasswordHash(payload.Password, user.PasswordHash) {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
 	token, err := auth.GenerateToken(user.ID, s.jwtSecret)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"token": token})
+	c.JSON(http.StatusOK, gin.H{"token": token})
+}
+
+func (s *Server) getMeHandler(c *gin.Context) {
+	userID, err := auth.GetUserIDFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Authentication successful",
+		"user_id": userID,
+	})
 }
